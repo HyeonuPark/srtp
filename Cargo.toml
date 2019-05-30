@@ -5,3 +5,5 @@ authors = ["Hyeonu Park <nemo1275@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+srtp2-sys = "2.20"
+bytes = "0.4"
