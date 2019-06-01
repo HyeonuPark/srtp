@@ -10,9 +10,9 @@ pub struct Srtp {
 
 #[derive(Debug)]
 pub struct Builder {
-    inner: sys::srtp_policy_t,
     rtp_policy: Option<CryptoPolicy>,
     rtcp_policy: Option<CryptoPolicy>,
+    ssrc_type: SsrcType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +34,14 @@ pub enum CryptoPolicy {
     AesGcm256Bit16Auth,
     NullCipherHmacNull,
     NullCipherHmacSha1Bit80,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SsrcType {
+    AnyInbound,
+    AnyOutbound,
+    Specific(u32),
+    Undefined,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,35 +137,59 @@ impl std::ops::Drop for Srtp {
 impl Builder {
     pub fn new() -> Self {
         Builder {
-            inner: unsafe { std::mem::zeroed() },
             rtp_policy: None,
             rtcp_policy: None,
+            ssrc_type: SsrcType::Undefined,
         }
     }
 
-    pub fn rtp_crypto_policy(&mut self, policy: CryptoPolicy) {
+    pub fn rtp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
         self.rtp_policy = Some(policy);
+        self
     }
 
-    pub fn rtcp_crypto_policy(&mut self, policy: CryptoPolicy) {
+    pub fn rtcp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
         self.rtcp_policy = Some(policy);
+        self
     }
 
-    pub fn create(&mut self, key: &[u8]) -> Result<Srtp, Error> {
+    pub fn ssrc_type(&mut self, ssrc: SsrcType) -> &mut Self {
+        self.ssrc_type = ssrc;
+        self
+    }
+
+    pub fn create(&self, key: &[u8]) -> Result<Srtp, Error> {
         unsafe {
+            let mut policy: sys::srtp_policy_t = std::mem::zeroed();
+
             match self.rtp_policy {
-                Some(policy) => init_crypto_policy(&mut self.inner.rtp, policy),
-                None => sys::srtp_crypto_policy_set_rtp_default(&mut self.inner.rtp),
+                Some(crypto) => init_crypto_policy(&mut policy.rtp, crypto),
+                None => sys::srtp_crypto_policy_set_rtp_default(&mut policy.rtp),
             }
             match self.rtcp_policy {
-                Some(policy) => init_crypto_policy(&mut self.inner.rtcp, policy),
-                None => sys::srtp_crypto_policy_set_rtcp_default(&mut self.inner.rtp),
+                Some(crypto) => init_crypto_policy(&mut policy.rtcp, crypto),
+                None => sys::srtp_crypto_policy_set_rtcp_default(&mut policy.rtcp),
+            }
+            match self.ssrc_type {
+                SsrcType::AnyInbound => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound
+                }
+                SsrcType::AnyOutbound => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound
+                }
+                SsrcType::Specific(value) => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_specific;
+                    policy.ssrc.value = value;
+                }
+                SsrcType::Undefined => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_undefined
+                }
             }
 
-            self.inner.key = key.as_ptr() as *mut _;
+            policy.key = key.as_ptr() as *mut _;
             let mut res = Srtp { inner: std::mem::zeroed() };
 
-            check(sys::srtp_create(&mut res.inner, &self.inner)).map(|_| res)
+            check(sys::srtp_create(&mut res.inner, &policy)).map(|_| res)
         }
     }
 }
