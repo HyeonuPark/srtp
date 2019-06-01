@@ -159,6 +159,9 @@ impl Builder {
     }
 
     pub fn create(&self, key: &[u8]) -> Result<Srtp, Error> {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
+
         unsafe {
             let mut policy: sys::srtp_policy_t = std::mem::zeroed();
 
