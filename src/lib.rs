@@ -18,20 +18,11 @@ pub struct Builder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoPolicy {
     AesCm128NullAuth,
-    AesCm192NullAuth,
     AesCm256NullAuth,
     AesCm128HmacSha1Bit32,
     AesCm128HmacSha1Bit80,
-    AesCm192HmacSha1Bit32,
-    AesCm192HmacSha1Bit80,
     AesCm256HmacSha1Bit32,
     AesCm256HmacSha1Bit80,
-    AesGcm128Bit8Auth,
-    AesGcm128Bit8OnlyAuth,
-    AesGcm128Bit16Auth,
-    AesGcm256Bit8Auth,
-    AesGcm256Bit8OnlyAuth,
-    AesGcm256Bit16Auth,
     NullCipherHmacNull,
     NullCipherHmacSha1Bit80,
 }
@@ -134,6 +125,8 @@ impl std::ops::Drop for Srtp {
     }
 }
 
+unsafe impl Send for Srtp {}
+
 impl Builder {
     pub fn new() -> Self {
         Builder {
@@ -161,6 +154,17 @@ impl Builder {
     pub fn create(&self, key: &[u8]) -> Result<Srtp, Error> {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
+
+        let rtp_keylen = self.rtp_policy
+            .unwrap_or(CryptoPolicy::AesCm128HmacSha1Bit80)
+            .master_key_salt_len();
+        let rtcp_keylen = self.rtcp_policy
+            .unwrap_or(CryptoPolicy::AesCm128HmacSha1Bit80)
+            .master_key_salt_len();
+
+        if key.len() < rtp_keylen.max(rtcp_keylen) {
+            Err(Error::BadParam)?
+        }
 
         unsafe {
             let mut policy: sys::srtp_policy_t = std::mem::zeroed();
@@ -197,25 +201,33 @@ impl Builder {
     }
 }
 
+impl CryptoPolicy {
+    pub fn master_key_salt_len(self) -> usize {
+        use CryptoPolicy::*;
+
+        match self {
+            AesCm128NullAuth        |
+            AesCm128HmacSha1Bit32   |
+            AesCm128HmacSha1Bit80   |
+            NullCipherHmacNull      |
+            NullCipherHmacSha1Bit80 => 30,
+            AesCm256NullAuth        |
+            AesCm256HmacSha1Bit32   |
+            AesCm256HmacSha1Bit80   => 46,
+        }
+    }
+}
+
 unsafe fn init_crypto_policy(ctx: &mut sys::srtp_crypto_policy_t, policy: CryptoPolicy) {
     use CryptoPolicy::*;
 
     match policy {
         AesCm128NullAuth        => sys::srtp_crypto_policy_set_aes_cm_128_null_auth(ctx),
-        AesCm192NullAuth        => sys::srtp_crypto_policy_set_aes_cm_192_null_auth(ctx),
         AesCm256NullAuth        => sys::srtp_crypto_policy_set_aes_cm_256_null_auth(ctx),
         AesCm128HmacSha1Bit32   => sys::srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32(ctx),
         AesCm128HmacSha1Bit80   => sys::srtp_crypto_policy_set_rtp_default(ctx),
-        AesCm192HmacSha1Bit32   => sys::srtp_crypto_policy_set_aes_cm_192_hmac_sha1_32(ctx),
-        AesCm192HmacSha1Bit80   => sys::srtp_crypto_policy_set_aes_cm_192_hmac_sha1_80(ctx),
         AesCm256HmacSha1Bit32   => sys::srtp_crypto_policy_set_aes_cm_256_hmac_sha1_32(ctx),
         AesCm256HmacSha1Bit80   => sys::srtp_crypto_policy_set_aes_cm_256_hmac_sha1_80(ctx),
-        AesGcm128Bit8Auth       => sys::srtp_crypto_policy_set_aes_gcm_128_8_auth(ctx),
-        AesGcm128Bit8OnlyAuth   => sys::srtp_crypto_policy_set_aes_gcm_128_8_only_auth(ctx),
-        AesGcm128Bit16Auth      => sys::srtp_crypto_policy_set_aes_gcm_128_16_auth(ctx),
-        AesGcm256Bit8Auth       => sys::srtp_crypto_policy_set_aes_gcm_256_8_auth(ctx),
-        AesGcm256Bit8OnlyAuth   => sys::srtp_crypto_policy_set_aes_gcm_256_8_only_auth(ctx),
-        AesGcm256Bit16Auth      => sys::srtp_crypto_policy_set_aes_gcm_256_16_auth(ctx),
         NullCipherHmacNull      => sys::srtp_crypto_policy_set_null_cipher_hmac_null(ctx),
         NullCipherHmacSha1Bit80 => sys::srtp_crypto_policy_set_null_cipher_hmac_sha1_80(ctx),
     }
