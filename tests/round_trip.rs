@@ -18,7 +18,7 @@ const HEADER_SIZE: usize = 12;
 const MAX_TRAILER_SIZE: usize = 144;
 
 impl Header {
-    fn to_bytes(self, payload_size: usize) -> BytesMut {
+    fn to_bytes(&self, payload_size: usize) -> BytesMut {
         let mut bytes = BytesMut::with_capacity(HEADER_SIZE + payload_size + MAX_TRAILER_SIZE);
 
         let mut b1 = 0b10000000u8;;
@@ -42,36 +42,79 @@ impl Header {
     }
 }
 
-#[test]
-fn round_trip() {
-    let key: Vec<_> = (0u8..30).collect();
+fn round_trip(policy: CryptoPolicy) {
+    let key: Vec<_> = (0u8..50).collect();
 
     let mut inbound = Builder::new()
-        .rtp_crypto_policy(CryptoPolicy::AesCm128HmacSha1Bit80)
-        .rtcp_crypto_policy(CryptoPolicy::AesCm128HmacSha1Bit80)
+        .rtp_crypto_policy(policy)
+        .rtcp_crypto_policy(policy)
         .ssrc_type(SsrcType::AnyInbound)
         .create(&key)
         .unwrap();
     let mut outbound = Builder::new()
-        .rtp_crypto_policy(CryptoPolicy::AesCm128HmacSha1Bit80)
-        .rtcp_crypto_policy(CryptoPolicy::AesCm128HmacSha1Bit80)
+        .rtp_crypto_policy(policy)
+        .rtcp_crypto_policy(policy)
         .ssrc_type(SsrcType::AnyOutbound)
         .create(&key)
         .unwrap();
 
-    let mut packet = Header {
-        header_ext: false,
-        padding: false,
-        payload_type: 0xF,
-        marker: false,
-        sequence: 0x1234,
-        timestamp: 0xDECAFBAD,
-        ssrc: 0xDEADBEEF,
-    }.to_bytes(1000);
-    let packet2 = packet.clone();
+    for sequence in 0x1234..0x1434 {
+        let input = Header {
+            header_ext: false,
+            padding: false,
+            payload_type: 96,
+            marker: false,
+            sequence,
+            timestamp: 0xDECAFBAD + (sequence as u32 / 10) * 3000,
+            ssrc: 0xDEADBEEF,
+        }.to_bytes(1000);
+        let mut output = input.clone();
 
-    outbound.protect(&mut packet).unwrap();
-    assert_ne!(packet, packet2);
-    inbound.unprotect(&mut packet).unwrap();
-    assert_eq!(packet, packet2);
+        outbound.protect(&mut output).unwrap();
+        if policy != CryptoPolicy::NullCipherHmacNull {
+            assert_ne!(input, output);
+        }
+        inbound.unprotect(&mut output).unwrap();
+        assert_eq!(input, output);
+    }
+}
+
+#[test]
+fn round_trip_aes_cm_128_null_auth() {
+    round_trip(CryptoPolicy::AesCm128NullAuth)
+}
+
+#[test]
+fn round_trip_aes_cm_256_null_auth() {
+    round_trip(CryptoPolicy::AesCm256NullAuth)
+}
+
+#[test]
+fn round_trip_aes_cm_128_hmac_sha1_32() {
+    round_trip(CryptoPolicy::AesCm128HmacSha1Bit32)
+}
+
+#[test]
+fn round_trip_aes_cm_128_hmac_sha1_80() {
+    round_trip(CryptoPolicy::AesCm128HmacSha1Bit80)
+}
+
+#[test]
+fn round_trip_aes_cm_256_hmac_sha1_32() {
+    round_trip(CryptoPolicy::AesCm256HmacSha1Bit32)
+}
+
+#[test]
+fn round_trip_aes_cm_256_hmac_sha1_80() {
+    round_trip(CryptoPolicy::AesCm256HmacSha1Bit80)
+}
+
+#[test]
+fn round_trip_null_cipher_hmac_null() {
+    round_trip(CryptoPolicy::NullCipherHmacNull)
+}
+
+#[test]
+fn round_trip_null_cipher_hmac_sha1_80() {
+    round_trip(CryptoPolicy::NullCipherHmacSha1Bit80)
 }
