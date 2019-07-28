@@ -1,7 +1,7 @@
 
 use bytes::{BytesMut, BufMut};
 
-use srtp::{Builder, CryptoPolicy, SsrcType};
+use srtp::{Srtp, CryptoPolicy, SsrcType};
 
 #[derive(Debug, Clone, Copy)]
 struct Header {
@@ -45,18 +45,8 @@ impl Header {
 fn round_trip(policy: CryptoPolicy) {
     let key: Vec<_> = (0u8..50).collect();
 
-    let mut inbound = Builder::new()
-        .rtp_crypto_policy(policy)
-        .rtcp_crypto_policy(policy)
-        .ssrc_type(SsrcType::AnyInbound)
-        .create(&key)
-        .unwrap();
-    let mut outbound = Builder::new()
-        .rtp_crypto_policy(policy)
-        .rtcp_crypto_policy(policy)
-        .ssrc_type(SsrcType::AnyOutbound)
-        .create(&key)
-        .unwrap();
+    let mut inbound = Srtp::new(SsrcType::AnyInbound, policy, policy, &key).unwrap();
+    let mut outbound = Srtp::new(SsrcType::AnyOutbound, policy, policy, &key).unwrap();
 
     for sequence in 0x1234..0x1434 {
         let input = Header {

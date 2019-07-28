@@ -8,13 +8,6 @@ pub struct Srtp {
     inner: sys::srtp_t,
 }
 
-#[derive(Debug)]
-pub struct Builder {
-    rtp_policy: CryptoPolicy,
-    rtcp_policy: CryptoPolicy,
-    ssrc_type: SsrcType,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoPolicy {
     AesCm128NullAuth,
@@ -72,6 +65,50 @@ const MAX_MKI_LEN: usize = 128;
 const MAX_TRAILER_LEN: usize = MAX_TAG_LEN + MAX_MKI_LEN;
 
 impl Srtp {
+    pub fn new(
+        ssrc_type: SsrcType,
+        rtp_policy: CryptoPolicy,
+        rtcp_policy: CryptoPolicy,
+        key: &[u8],
+    ) -> Result<Self, Error> {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
+
+        let rtp_keylen = rtp_policy.master_key_salt_len();
+        let rtcp_keylen = rtcp_policy.master_key_salt_len();
+
+        if key.len() < rtp_keylen.max(rtcp_keylen) {
+            Err(Error::BadParam)?
+        }
+
+        unsafe {
+            let mut policy: sys::srtp_policy_t = std::mem::zeroed();
+
+            init_crypto_policy(&mut policy.rtp, rtp_policy);
+            init_crypto_policy(&mut policy.rtcp, rtcp_policy);
+            match ssrc_type {
+                SsrcType::AnyInbound => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound
+                }
+                SsrcType::AnyOutbound => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound
+                }
+                SsrcType::Specific(value) => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_specific;
+                    policy.ssrc.value = value;
+                }
+                SsrcType::Undefined => {
+                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_undefined
+                }
+            }
+
+            policy.key = key.as_ptr() as *mut _;
+            let mut res = Srtp { inner: std::mem::zeroed() };
+
+            check(sys::srtp_create(&mut res.inner, &policy)).map(|_| res)
+        }
+    }
+
     pub fn protect(&mut self, data: &mut BytesMut) -> Result<(), Error> {
         unsafe {
             data.reserve(MAX_TRAILER_LEN);
@@ -120,70 +157,6 @@ impl std::ops::Drop for Srtp {
 }
 
 unsafe impl Send for Srtp {}
-
-impl Builder {
-    pub fn new() -> Self {
-        Builder {
-            rtp_policy: CryptoPolicy::AesCm128HmacSha1Bit80,
-            rtcp_policy: CryptoPolicy::AesCm128HmacSha1Bit80,
-            ssrc_type: SsrcType::Undefined,
-        }
-    }
-
-    pub fn rtp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
-        self.rtp_policy = policy;
-        self
-    }
-
-    pub fn rtcp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
-        self.rtcp_policy = policy;
-        self
-    }
-
-    pub fn ssrc_type(&mut self, ssrc: SsrcType) -> &mut Self {
-        self.ssrc_type = ssrc;
-        self
-    }
-
-    pub fn create(&self, key: &[u8]) -> Result<Srtp, Error> {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
-
-        let rtp_keylen = self.rtp_policy.master_key_salt_len();
-        let rtcp_keylen = self.rtcp_policy.master_key_salt_len();
-
-        if key.len() < rtp_keylen.max(rtcp_keylen) {
-            Err(Error::BadParam)?
-        }
-
-        unsafe {
-            let mut policy: sys::srtp_policy_t = std::mem::zeroed();
-
-            init_crypto_policy(&mut policy.rtp, self.rtp_policy);
-            init_crypto_policy(&mut policy.rtcp, self.rtcp_policy);
-            match self.ssrc_type {
-                SsrcType::AnyInbound => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound
-                }
-                SsrcType::AnyOutbound => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound
-                }
-                SsrcType::Specific(value) => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_specific;
-                    policy.ssrc.value = value;
-                }
-                SsrcType::Undefined => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_undefined
-                }
-            }
-
-            policy.key = key.as_ptr() as *mut _;
-            let mut res = Srtp { inner: std::mem::zeroed() };
-
-            check(sys::srtp_create(&mut res.inner, &policy)).map(|_| res)
-        }
-    }
-}
 
 impl CryptoPolicy {
     pub fn master_key_salt_len(self) -> usize {
