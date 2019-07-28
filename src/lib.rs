@@ -10,8 +10,8 @@ pub struct Srtp {
 
 #[derive(Debug)]
 pub struct Builder {
-    rtp_policy: Option<CryptoPolicy>,
-    rtcp_policy: Option<CryptoPolicy>,
+    rtp_policy: CryptoPolicy,
+    rtcp_policy: CryptoPolicy,
     ssrc_type: SsrcType,
 }
 
@@ -67,15 +67,14 @@ pub enum Error {
     Unknown,
 }
 
+const MAX_TAG_LEN: usize = 16;
+const MAX_MKI_LEN: usize = 128;
+const MAX_TRAILER_LEN: usize = MAX_TAG_LEN + MAX_MKI_LEN;
+
 impl Srtp {
     pub fn protect(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        let trailer_length = unsafe {
-            let mut len = 0u32;
-            check(sys::srtp_get_protect_trailer_length(self.inner, 0, 0, &mut len))?;
-            len
-        };
-        data.reserve(trailer_length as usize);
         unsafe {
+            data.reserve(MAX_TRAILER_LEN);
             let mut len = data.len() as _;
             check(sys::srtp_protect(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
             data.set_len(len as usize);
@@ -84,13 +83,8 @@ impl Srtp {
     }
 
     pub fn protect_rtcp(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        let trailer_length = unsafe {
-            let mut len = 0u32;
-            check(sys::srtp_get_protect_rtcp_trailer_length(self.inner, 0, 0, &mut len))?;
-            len
-        };
-        data.reserve(trailer_length as usize);
         unsafe {
+            data.reserve(MAX_TRAILER_LEN);
             let mut len = data.len() as _;
             check(sys::srtp_protect_rtcp(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
             data.set_len(len as usize);
@@ -130,19 +124,19 @@ unsafe impl Send for Srtp {}
 impl Builder {
     pub fn new() -> Self {
         Builder {
-            rtp_policy: None,
-            rtcp_policy: None,
+            rtp_policy: CryptoPolicy::AesCm128HmacSha1Bit80,
+            rtcp_policy: CryptoPolicy::AesCm128HmacSha1Bit80,
             ssrc_type: SsrcType::Undefined,
         }
     }
 
     pub fn rtp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
-        self.rtp_policy = Some(policy);
+        self.rtp_policy = policy;
         self
     }
 
     pub fn rtcp_crypto_policy(&mut self, policy: CryptoPolicy) -> &mut Self {
-        self.rtcp_policy = Some(policy);
+        self.rtcp_policy = policy;
         self
     }
 
@@ -155,12 +149,8 @@ impl Builder {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
 
-        let rtp_keylen = self.rtp_policy
-            .unwrap_or(CryptoPolicy::AesCm128HmacSha1Bit80)
-            .master_key_salt_len();
-        let rtcp_keylen = self.rtcp_policy
-            .unwrap_or(CryptoPolicy::AesCm128HmacSha1Bit80)
-            .master_key_salt_len();
+        let rtp_keylen = self.rtp_policy.master_key_salt_len();
+        let rtcp_keylen = self.rtcp_policy.master_key_salt_len();
 
         if key.len() < rtp_keylen.max(rtcp_keylen) {
             Err(Error::BadParam)?
@@ -169,14 +159,8 @@ impl Builder {
         unsafe {
             let mut policy: sys::srtp_policy_t = std::mem::zeroed();
 
-            match self.rtp_policy {
-                Some(crypto) => init_crypto_policy(&mut policy.rtp, crypto),
-                None => sys::srtp_crypto_policy_set_rtp_default(&mut policy.rtp),
-            }
-            match self.rtcp_policy {
-                Some(crypto) => init_crypto_policy(&mut policy.rtcp, crypto),
-                None => sys::srtp_crypto_policy_set_rtcp_default(&mut policy.rtcp),
-            }
+            init_crypto_policy(&mut policy.rtp, self.rtp_policy);
+            init_crypto_policy(&mut policy.rtcp, self.rtcp_policy);
             match self.ssrc_type {
                 SsrcType::AnyInbound => {
                     policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound
