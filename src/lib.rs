@@ -159,19 +159,38 @@ impl std::ops::Drop for Srtp {
 unsafe impl Send for Srtp {}
 
 impl CryptoPolicy {
-    pub fn master_key_salt_len(self) -> usize {
+    pub fn master_key_len(self) -> usize {
         use CryptoPolicy::*;
 
         match self {
-            AesCm128NullAuth        |
-            AesCm128HmacSha1Bit32   |
-            AesCm128HmacSha1Bit80   |
-            NullCipherHmacNull      |
-            NullCipherHmacSha1Bit80 => 30,
-            AesCm256NullAuth        |
-            AesCm256HmacSha1Bit32   |
-            AesCm256HmacSha1Bit80   => 46,
+            AesCm128NullAuth |
+            AesCm128HmacSha1Bit32 |
+            AesCm128HmacSha1Bit80 |
+            AesCm256HmacSha1Bit80 |
+            NullCipherHmacNull |
+            NullCipherHmacSha1Bit80 => 16,
+            AesCm256NullAuth |
+            AesCm256HmacSha1Bit32 => 32,
         }
+    }
+
+    pub fn master_salt_len(self) -> usize {
+        use CryptoPolicy::*;
+
+        match self {
+            AesCm128NullAuth |
+            AesCm128HmacSha1Bit32 |
+            AesCm128HmacSha1Bit80 |
+            AesCm256HmacSha1Bit80 |
+            NullCipherHmacNull |
+            NullCipherHmacSha1Bit80 |
+            AesCm256NullAuth |
+            AesCm256HmacSha1Bit32 => 14,
+        }
+    }
+
+    pub fn master_key_salt_len(self) -> usize {
+        self.master_key_len() + self.master_salt_len()
     }
 }
 
