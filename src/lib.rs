@@ -103,9 +103,9 @@ impl Srtp {
             }
 
             policy.key = key.as_ptr() as *mut _;
-            let mut res = Srtp { inner: std::mem::zeroed() };
+            let mut inner = std::ptr::null_mut();
 
-            check(sys::srtp_create(&mut res.inner, &policy)).map(|_| res)
+            check(sys::srtp_create(&mut inner, &policy)).map(|_| Srtp { inner })
         }
     }
 
@@ -172,6 +172,12 @@ impl CryptoPolicy {
             AesCm256HmacSha1Bit32   |
             AesCm256HmacSha1Bit80   => 46,
         }
+    }
+}
+
+impl Default for CryptoPolicy {
+    fn default() -> Self {
+        CryptoPolicy::AesCm128HmacSha1Bit80
     }
 }
 
