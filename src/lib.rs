@@ -60,6 +60,12 @@ pub enum Error {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KeyPair<'a> {
+    pub client: &'a [u8],
+    pub server: &'a [u8],
+}
+
 const MAX_TAG_LEN: usize = 16;
 const MAX_MKI_LEN: usize = 128;
 const MAX_TRAILER_LEN: usize = MAX_TAG_LEN + MAX_MKI_LEN;
@@ -186,6 +192,22 @@ impl CryptoPolicy {
 
     pub fn master_len(self) -> usize {
         self.master_key_len() + self.master_salt_len()
+    }
+
+    /// # Panics
+    /// Panics if given `buf` is shorter than `2 * self.master_len()`
+    pub fn extract_keying_material(self, buf: &mut [u8]) -> KeyPair {
+        assert!(buf.len() >= 2 * self.master_len());
+
+        let rot_start = self.master_key_len();
+        let rot_end = 2 * self.master_key_len() + self.master_salt_len();
+
+        buf[rot_start..rot_end].rotate_left(self.master_key_len());
+
+        KeyPair {
+            client: &buf[..self.master_len()],
+            server: &buf[self.master_len()..(2 * self.master_len())],
+        }
     }
 }
 
