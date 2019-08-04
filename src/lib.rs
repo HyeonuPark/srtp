@@ -74,8 +74,8 @@ impl Srtp {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
 
-        let rtp_keylen = rtp_policy.master_key_salt_len();
-        let rtcp_keylen = rtcp_policy.master_key_salt_len();
+        let rtp_keylen = rtp_policy.master_len();
+        let rtcp_keylen = rtcp_policy.master_len();
 
         if key.len() < rtp_keylen.max(rtcp_keylen) {
             Err(Error::BadParam)?
@@ -159,6 +159,12 @@ impl std::ops::Drop for Srtp {
 unsafe impl Send for Srtp {}
 
 impl CryptoPolicy {
+    pub const MASTER_KEY_LEN_128: usize = 16;
+    pub const MASTER_KEY_LEN_256: usize = 32;
+    pub const MASTER_SALT_LEN: usize = 14;
+    pub const MAX_MASTER_LEN: usize =
+        CryptoPolicy::MASTER_KEY_LEN_256 + CryptoPolicy::MASTER_SALT_LEN;
+
     pub fn master_key_len(self) -> usize {
         use CryptoPolicy::*;
 
@@ -168,28 +174,17 @@ impl CryptoPolicy {
             AesCm128HmacSha1Bit80 |
             AesCm256HmacSha1Bit80 |
             NullCipherHmacNull |
-            NullCipherHmacSha1Bit80 => 16,
+            NullCipherHmacSha1Bit80 => CryptoPolicy::MASTER_KEY_LEN_128,
             AesCm256NullAuth |
-            AesCm256HmacSha1Bit32 => 32,
+            AesCm256HmacSha1Bit32 => CryptoPolicy::MASTER_KEY_LEN_256,
         }
     }
 
     pub fn master_salt_len(self) -> usize {
-        use CryptoPolicy::*;
-
-        match self {
-            AesCm128NullAuth |
-            AesCm128HmacSha1Bit32 |
-            AesCm128HmacSha1Bit80 |
-            AesCm256HmacSha1Bit80 |
-            NullCipherHmacNull |
-            NullCipherHmacSha1Bit80 |
-            AesCm256NullAuth |
-            AesCm256HmacSha1Bit32 => 14,
-        }
+        CryptoPolicy::MASTER_SALT_LEN
     }
 
-    pub fn master_key_salt_len(self) -> usize {
+    pub fn master_len(self) -> usize {
         self.master_key_len() + self.master_salt_len()
     }
 }
