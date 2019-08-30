@@ -57,7 +57,7 @@ pub enum Error {
     SocketErr,
     Terminus,
     WriteFail,
-    Unknown,
+    Unknown(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -239,6 +239,7 @@ fn check(maybe_error: sys::srtp_err_status_t) -> Result<(), Error> {
         sys::srtp_err_status_t_srtp_err_status_ok => return Ok(()),
         sys::srtp_err_status_t_srtp_err_status_algo_fail => AlgoFail,
         sys::srtp_err_status_t_srtp_err_status_alloc_fail => AllocFail,
+        sys::srtp_err_status_t_srtp_err_status_auth_fail => AuthFail,
         sys::srtp_err_status_t_srtp_err_status_bad_mki => BadMki,
         sys::srtp_err_status_t_srtp_err_status_bad_param => BadParam,
         sys::srtp_err_status_t_srtp_err_status_cant_check => CantCheck,
@@ -263,6 +264,6 @@ fn check(maybe_error: sys::srtp_err_status_t) -> Result<(), Error> {
         sys::srtp_err_status_t_srtp_err_status_socket_err => SocketErr,
         sys::srtp_err_status_t_srtp_err_status_terminus => Terminus,
         sys::srtp_err_status_t_srtp_err_status_write_fail => WriteFail,
-        _ => Unknown,
+        _ => Unknown(maybe_error),
     })
 }
