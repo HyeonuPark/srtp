@@ -1,16 +1,16 @@
 [package]
 name = "srtp"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Hyeonu Park <nemo1275@gmail.com>"]
 edition = "2018"
 
 description = "Rusty wrapper for libsrtp2"
-documentation = "https://docs.rs/srtp/0.1.0/srtp"
+documentation = "https://docs.rs/srtp/0.5.0/srtp"
 repository = "https://github.com/HyeonuPark/srtp"
 keywords = ["srtp"]
 categories = ["multimedia", "network-programming"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-srtp2-sys = "2.20"
+srtp2-sys = "2.30"
 bytes = "0.4"

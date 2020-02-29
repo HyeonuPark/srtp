@@ -21,7 +21,7 @@ impl Header {
     fn to_bytes(&self, payload_size: usize) -> BytesMut {
         let mut bytes = BytesMut::with_capacity(HEADER_SIZE + payload_size + MAX_TRAILER_SIZE);
 
-        let mut b1 = 0b10000000u8;;
+        let mut b1 = 0b10000000u8;
         b1 |= (self.padding as u8) << 5;
         b1 |= (self.header_ext as u8) << 4;
 
