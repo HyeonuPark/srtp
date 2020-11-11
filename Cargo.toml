@@ -15,6 +15,7 @@ license = "MIT OR Apache-2.0"
 srtp2-sys = "3.0"
 paste = "1.0"
 bytes = {version = "0.6", optional = true}
+log = {version = "0.4", optional = true}
 
 [features]
-default = ["bytes"]
+default = ["bytes", "log"]
