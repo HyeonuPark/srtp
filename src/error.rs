@@ -5,7 +5,7 @@ use paste::paste;
 
 use crate::sys;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Error(NonZeroU32);
 
 macro_rules! impl_error {

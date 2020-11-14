@@ -19,3 +19,11 @@ log = {version = "0.4", optional = true}
 
 [features]
 default = ["bytes", "log"]
+skip-linking = ["srtp2-sys/skip-linking"]
+build-libsrtp = ["srtp2-sys/build"]
+enable-openssl = ["srtp2-sys/enable-openssl"]
+build-openssl = ["enable-openssl", "srtp2-sys/build-openssl"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["skip-linking", "enable-openssl"]

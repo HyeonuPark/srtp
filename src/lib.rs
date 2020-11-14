@@ -1,8 +1,12 @@
+#![cfg_attr(feature = "skip-linking", feature(doc_cfg))]
+
+mod crypto_policy;
 mod error;
 mod vec_like;
 
 pub use srtp2_sys as sys;
 
+pub use crypto_policy::CryptoPolicy;
 pub use error::Error;
 pub use vec_like::VecLike;
 
