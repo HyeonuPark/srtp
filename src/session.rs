@@ -1,5 +1,6 @@
 //! SRTP session and its core functionalities
 
+use std::any::Any;
 use std::convert::TryInto;
 use std::ffi::c_void;
 use std::mem::MaybeUninit;
@@ -46,6 +47,18 @@ pub struct StreamPolicy<'a> {
     pub allow_repeat_tx: bool,
     /// List of header ids to encrypt.
     pub encrypt_extension_headers: &'a [i32],
+}
+
+type EventHandler = Option<
+    Box<dyn FnMut(&mut SessionRef, u32, Option<&mut (dyn Any + Send + 'static)>) + Send + 'static>,
+>;
+
+#[derive(Default)]
+pub(crate) struct UserDataWrapper {
+    pub(crate) user_data: Option<Box<dyn Any + Send + 'static>>,
+    on_ssrc_collision: EventHandler,
+    on_key_hard_limit: EventHandler,
+    on_key_soft_limit: EventHandler,
 }
 
 impl Session {
@@ -233,6 +246,67 @@ impl SessionRef {
             Ok(())
         }
     }
+
+    pub(crate) fn user_data_wrapper(&mut self) -> &mut UserDataWrapper {
+        unsafe {
+            match (sys::srtp_get_user_data(self.as_ptr()) as *mut UserDataWrapper).as_mut() {
+                Some(wrapper) => wrapper,
+                None => {
+                    let wrapper = Box::into_raw(Box::new(UserDataWrapper::default()));
+                    sys::srtp_set_user_data(self.as_ptr(), wrapper as *mut c_void);
+                    &mut *wrapper
+                }
+            }
+        }
+    }
+
+    /// Store user data to the SRTP session. This can be useful to share data with the event callbacks.
+    pub fn set_user_data<T>(&mut self, data: T)
+    where
+        T: Any + Send + 'static,
+    {
+        self.user_data_wrapper().user_data = Some(Box::new(data))
+    }
+
+    /// Access the use data previously stored into the SRTP session, if any.
+    pub fn user_data(&mut self) -> Option<&mut (dyn Any + Send + 'static)> {
+        self.user_data_wrapper().user_data.as_deref_mut()
+    }
+
+    /// Take the user data back from the SRTP session, if any.
+    pub fn take_user_data(&mut self) -> Option<Box<dyn Any + Send + 'static>> {
+        self.user_data_wrapper().user_data.take()
+    }
+
+    /// Set callback for SSRC collision event.
+    pub fn on_ssrc_collision<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut SessionRef, u32, Option<&mut (dyn Any + Send + 'static)>) + Send + 'static,
+    {
+        self.user_data_wrapper().on_ssrc_collision = Some(Box::new(f))
+    }
+
+    /// Set callback for key hard limit event.
+    ///
+    /// This means the SRTP stream with given SSRC reached
+    /// the hard key usage limit and has expired.
+    pub fn on_key_hard_limit<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut SessionRef, u32, Option<&mut (dyn Any + Send + 'static)>) + Send + 'static,
+    {
+        self.user_data_wrapper().on_key_hard_limit = Some(Box::new(f))
+    }
+
+    /// Set callback for key soft limit event.
+    ///
+    /// This means the SRTP stream with given SSRC reached
+    /// the soft key usage limit and will expire soon.
+    pub fn on_key_soft_limit<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut SessionRef, u32, Option<&mut (dyn Any + Send + 'static)>) + Send + 'static,
+    {
+        self.user_data_wrapper().on_key_soft_limit = Some(Box::new(f))
+    }
 }
 
 impl StreamPolicy<'_> {
@@ -281,5 +355,16 @@ impl StreamPolicy<'_> {
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_specific;
         policy.ssrc.value = ssrc;
         Ok(policy)
+    }
+}
+
+impl UserDataWrapper {
+    pub(crate) fn event_handler(&mut self, kind: sys::srtp_event_t) -> &mut EventHandler {
+        match kind {
+            sys::srtp_event_t_event_ssrc_collision => &mut self.on_ssrc_collision,
+            sys::srtp_event_t_event_key_hard_limit => &mut self.on_key_hard_limit,
+            sys::srtp_event_t_event_key_soft_limit => &mut self.on_key_soft_limit,
+            _ => unreachable!(),
+        }
     }
 }

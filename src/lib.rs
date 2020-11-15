@@ -43,6 +43,17 @@ mod log_macros {
             eprintln!(concat!("ERR: ", $format))
         };
     }
+
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! warn {
+        ($format:literal, $($t:tt)*) => {
+            eprintln!(concat!("WARN: ", $format), $($t)*)
+        };
+        ($format:literal) => {
+            eprintln!(concat!("WARN: ", $format))
+        };
+    }
 }
 
 mod crypto_policy;
@@ -68,6 +79,9 @@ pub fn ensure_init() {
     ONCE.call_once(|| unsafe {
         Error::check(sys::srtp_init()).expect("Failed to initialize the libsrtp");
 
+        Error::check(sys::srtp_install_event_handler(Some(handle_event)))
+            .expect("Failed to install global event handler to the libsrtp");
+
         #[cfg(feature = "log")]
         Error::check(sys::srtp_install_log_handler(
             Some(handle_log),
@@ -75,6 +89,76 @@ pub fn ensure_init() {
         ))
         .expect("Failed to install log handler to the libsrtp")
     })
+}
+
+/// Returns the numeric representation of the libsrtp version.
+///
+/// Major and minor version number takes single byte,
+/// and the micro takes remaining two.
+///
+/// For example, version 2.3.0 yields `0x02_03_0000`
+pub fn get_version() -> u32 {
+    ensure_init();
+    unsafe { sys::srtp_get_version() }
+}
+
+/// Returns the version string of the libsrtp.
+pub fn get_version_string() -> &'static str {
+    ensure_init();
+    unsafe {
+        let version_ptr = sys::srtp_get_version_string();
+        std::ffi::CStr::from_ptr(version_ptr)
+            .to_str()
+            .expect("libsrtp returns version string which is not a valid UTF-8 sequence")
+    }
+}
+
+unsafe extern "C" fn handle_event(data: *mut sys::srtp_event_data_t) {
+    use foreign_types::ForeignTypeRef;
+
+    let sys::srtp_event_data_t {
+        session,
+        ssrc,
+        event,
+    } = *data;
+
+    match event {
+        sys::srtp_event_t_event_ssrc_collision => warn!(
+            "SSRC collision event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        sys::srtp_event_t_event_key_hard_limit => warn!(
+            "key hard limit event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        sys::srtp_event_t_event_key_soft_limit => warn!(
+            "key soft limit event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        _ => {
+            warn!(
+                "Unknown event detected. \
+                Please report this log line to this crate's repository. \
+                event: {}, session: {:p}, ssrc: {}",
+                event, session, ssrc
+            );
+            return;
+        }
+    }
+
+    let session = session::SessionRef::from_ptr_mut((*data).session);
+    let wrapper = session.user_data_wrapper();
+    let mut user_data = wrapper.user_data.take();
+    let mut handler = match wrapper.event_handler(event).take() {
+        Some(handler) => handler,
+        None => return,
+    };
+
+    handler(session, ssrc, user_data.as_deref_mut());
+
+    let wrapper = session.user_data_wrapper();
+    wrapper.user_data = user_data;
+    *wrapper.event_handler(event) = Some(handler);
 }
 
 #[cfg(feature = "log")]
