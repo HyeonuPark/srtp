@@ -5,6 +5,11 @@ use paste::paste;
 
 use crate::sys;
 
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+/// SRTP error.
+///
+/// This type is a wrapper around the `srtp_err_status_t` type of the libsrtp2.
 #[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Error(NonZeroU32);
 
@@ -13,6 +18,7 @@ macro_rules! impl_error {
         paste ! {
             impl Error {
                 $(
+                    #[allow(missing_docs)]
                     pub const [<$name:upper>]: Error = Error(unsafe {
                         NonZeroU32::new_unchecked(
                             sys::[<srtp_err_status_t_srtp_err_status_ $name>] as _,
@@ -77,6 +83,9 @@ impl_error! {
 }
 
 impl Error {
+    /// Check and convert the libsrtp operation result.
+    ///
+    /// Zero maps to `Ok(())`, others map to corresponding constants.
     pub fn check(res: sys::srtp_err_status_t) -> Result<(), Self> {
         match NonZeroU32::new(res as _) {
             None => Ok(()),

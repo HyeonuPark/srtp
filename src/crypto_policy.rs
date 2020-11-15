@@ -3,20 +3,29 @@ use std::mem::MaybeUninit;
 
 use crate::sys;
 
+/// Cryptography policy used by the SRTP protection.
 #[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 pub struct CryptoPolicy {
     set: unsafe extern "C" fn(*mut sys::srtp_crypto_policy_t),
 }
 
 impl CryptoPolicy {
+    #[allow(missing_docs)]
     pub const AES_CM_128_HMAC_SHA1_80: CryptoPolicy = CryptoPolicy {
         set: sys::srtp_crypto_policy_set_rtp_default,
     };
 
-    pub(crate) unsafe fn make(self) -> sys::srtp_crypto_policy_t {
-        let mut policy = MaybeUninit::uninit();
-        (self.set)(policy.as_mut_ptr());
-        policy.assume_init()
+    /// Get required key length of this crypto policy.
+    pub fn key_len(self) -> usize {
+        self.make().cipher_key_len as usize
+    }
+
+    pub(crate) fn make(self) -> sys::srtp_crypto_policy_t {
+        unsafe {
+            let mut policy = MaybeUninit::uninit();
+            (self.set)(policy.as_mut_ptr());
+            policy.assume_init()
+        }
     }
 }
 
@@ -31,6 +40,7 @@ macro_rules! define_policies {
         paste::paste! {
             impl CryptoPolicy {
                 $(
+                    #[allow(missing_docs)]
                     pub const [<$crypto:upper>]: CryptoPolicy = CryptoPolicy {
                         set: sys::[<srtp_crypto_policy_set_ $crypto>],
                     };
@@ -38,6 +48,7 @@ macro_rules! define_policies {
                 $(
                     #[cfg(feature = "enable-openssl")]
                     #[cfg_attr(docsrs, doc(cfg(feature = "enable-openssl")))]
+                    #[allow(missing_docs)]
                     pub const [<$openssl_crypto:upper>]: CryptoPolicy = CryptoPolicy {
                         set: sys::[<srtp_crypto_policy_set_ $openssl_crypto>],
                     };

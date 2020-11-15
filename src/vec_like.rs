@@ -1,6 +1,8 @@
+//! The [`VecLike`](self::VecLike) trait and its supplement types.
+
 use std::convert::TryInto;
 
-/// `Vec<u8>`-like buffer so we can append tag bytes after modify its content.
+/// `Vec<u8>`-like buffer so we can append or shrink tag bytes after modifying its content.
 ///
 /// A `VecLike` type has a byte buffer it can write into,
 /// whose length is `capacity` and its first `size` bytes are initialized.
@@ -13,15 +15,12 @@ pub trait VecLike {
     ///
     /// # Safety
     ///
+    /// This function usually is safe to call, but it's unsafe to implement.
+    ///
     /// After calling this method,
     /// - the content of `self.as_mut_bytes()` must not be changed.
     /// - `capacity` must be greater than or equal to the `size + additional`.
-    ///
-    /// # Panics
-    ///
-    /// Implementation may panic if it's backed by a buffer with fixed length
-    /// which cannot satisfy the safety requirement.
-    unsafe fn reserve(&mut self, additional: usize);
+    unsafe fn reserve(&mut self, additional: usize) -> Result<(), BufferTooShortError>;
 
     /// Forces the `size` to `new_len`.
     ///
@@ -31,13 +30,26 @@ pub trait VecLike {
     unsafe fn set_len(&mut self, new_len: usize);
 }
 
+/// Error that can be returned by the `VecLike::reserve()` call.
+///
+/// Some implementations of the `VecLike` trait is not backed by the growable buffer.
+/// This error indicates the the length of the backing fixed size buffer
+/// is not large enough to satisfy the safety requirement of the `VecLike::reserve()`.
+#[derive(Debug, thiserror::Error)]
+#[error("Cannot reserve buffer capacity to {requested_capacity}")]
+pub struct BufferTooShortError {
+    /// Total capacity required to satisfy the `VecLike::reserve()` call.
+    pub requested_capacity: usize,
+}
+
 impl VecLike for Vec<u8> {
     fn as_mut_bytes(&mut self) -> &mut [u8] {
         self.as_mut_slice()
     }
 
-    unsafe fn reserve(&mut self, additional: usize) {
-        Vec::reserve(self, additional)
+    unsafe fn reserve(&mut self, additional: usize) -> Result<(), BufferTooShortError> {
+        Vec::reserve(self, additional);
+        Ok(())
     }
 
     unsafe fn set_len(&mut self, new_len: usize) {
@@ -53,10 +65,17 @@ impl<'a> VecLike for std::io::Cursor<&'a mut [u8]> {
         &mut bytes[..pos]
     }
 
-    unsafe fn reserve(&mut self, additional: usize) {
+    unsafe fn reserve(&mut self, additional: usize) -> Result<(), BufferTooShortError> {
         let pos = self.position().try_into().unwrap_or(usize::max_value());
         let reserved = pos.saturating_add(additional);
-        assert!(reserved >= self.get_ref().len())
+
+        if reserved >= self.get_ref().len() {
+            Ok(())
+        } else {
+            Err(BufferTooShortError {
+                requested_capacity: reserved,
+            })
+        }
     }
 
     unsafe fn set_len(&mut self, new_len: usize) {
@@ -70,8 +89,9 @@ impl VecLike for bytes::BytesMut {
         &mut self[..]
     }
 
-    unsafe fn reserve(&mut self, additional: usize) {
-        bytes::BytesMut::reserve(self, additional)
+    unsafe fn reserve(&mut self, additional: usize) -> Result<(), BufferTooShortError> {
+        bytes::BytesMut::reserve(self, additional);
+        Ok(())
     }
 
     unsafe fn set_len(&mut self, new_len: usize) {
