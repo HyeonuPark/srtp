@@ -58,6 +58,8 @@ mod log_macros {
 
 mod crypto_policy;
 mod error;
+#[cfg(feature = "openssl")]
+pub mod openssl;
 pub mod session;
 pub mod vec_like;
 

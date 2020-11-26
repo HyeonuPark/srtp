@@ -4,34 +4,47 @@ use std::mem::MaybeUninit;
 use crate::sys;
 
 /// Cryptography policy used by the SRTP protection.
-#[derive(Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct CryptoPolicy {
-    set: unsafe extern "C" fn(*mut sys::srtp_crypto_policy_t),
+    inner: sys::srtp_crypto_policy_t,
 }
 
 impl CryptoPolicy {
     #[allow(missing_docs)]
-    pub const AES_CM_128_HMAC_SHA1_80: CryptoPolicy = CryptoPolicy {
-        set: sys::srtp_crypto_policy_set_rtp_default,
-    };
+    pub fn aes_cm_128_hmac_sha1_80() -> Self {
+        unsafe {
+            let mut policy = MaybeUninit::uninit();
+            sys::srtp_crypto_policy_set_rtp_default(policy.as_mut_ptr());
+            Self {
+                inner: policy.assume_init(),
+            }
+        }
+    }
 
     /// Get required key length of this crypto policy.
     pub fn key_len(self) -> usize {
-        self.make().cipher_key_len as usize
+        self.inner.cipher_key_len as usize
     }
 
-    pub(crate) fn make(self) -> sys::srtp_crypto_policy_t {
-        unsafe {
-            let mut policy = MaybeUninit::uninit();
-            (self.set)(policy.as_mut_ptr());
-            policy.assume_init()
-        }
+    /// Construct CryptoPolicy from the C struct
+    ///
+    /// # Safety
+    ///
+    /// `raw` value should be initialized using the functions of the libsrtp2
+    /// and should not be modified after initialization.
+    pub unsafe fn from_raw(raw: sys::srtp_crypto_policy_t) -> Self {
+        CryptoPolicy { inner: raw }
+    }
+
+    /// Get the C struct underneath.
+    pub fn into_raw(self) -> sys::srtp_crypto_policy_t {
+        self.inner
     }
 }
 
 impl Default for CryptoPolicy {
     fn default() -> Self {
-        CryptoPolicy::AES_CM_128_HMAC_SHA1_80
+        Self::aes_cm_128_hmac_sha1_80()
     }
 }
 
@@ -41,38 +54,35 @@ macro_rules! define_policies {
             impl CryptoPolicy {
                 $(
                     #[allow(missing_docs)]
-                    pub const [<$crypto:upper>]: CryptoPolicy = CryptoPolicy {
-                        set: sys::[<srtp_crypto_policy_set_ $crypto>],
-                    };
+                    pub fn [<$crypto>]() -> Self {
+                        unsafe {
+                            let mut policy = MaybeUninit::uninit();
+                            sys::[<srtp_crypto_policy_set_ $crypto>](policy.as_mut_ptr());
+                            Self {
+                                inner: policy.assume_init(),
+                            }
+                        }
+                    }
                 )*
                 $(
                     #[cfg(feature = "enable-openssl")]
                     #[cfg_attr(docsrs, doc(cfg(feature = "enable-openssl")))]
                     #[allow(missing_docs)]
-                    pub const [<$openssl_crypto:upper>]: CryptoPolicy = CryptoPolicy {
-                        set: sys::[<srtp_crypto_policy_set_ $openssl_crypto>],
-                    };
+                    pub fn [<$openssl_crypto>]() -> Self {
+                        unsafe {
+                            let mut policy = MaybeUninit::uninit();
+                            sys::[<srtp_crypto_policy_set_ $openssl_crypto>](policy.as_mut_ptr());
+                            Self {
+                                inner: policy.assume_init(),
+                            }
+                        }
+                    }
                 )*
             }
 
             impl fmt::Debug for CryptoPolicy {
                 fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                    if self == &CryptoPolicy::AES_CM_128_HMAC_SHA1_80 {
-                        return f.write_str("AES_CM_128_HMAC_SHA1_80")
-                    }
-                    $(
-                        if self == &CryptoPolicy::[<$crypto:upper>] {
-                            return f.write_str(stringify!($crypto))
-                        }
-                    )*
-                    $(
-                        #[cfg(feature = "enable-openssl")]
-                        if self == &CryptoPolicy::[<$openssl_crypto:upper>] {
-                            return f.write_str(stringify!($openssl_crypto))
-                        }
-                    )*
-
-                    f.write_str("UNKNOWN")
+                    write!(f, "CryptoPolicy {{ cipher_key_len: {}, .. }}", self.key_len())
                 }
             }
         }

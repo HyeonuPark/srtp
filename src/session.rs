@@ -3,6 +3,7 @@
 use std::any::Any;
 use std::convert::TryInto;
 use std::ffi::c_void;
+use std::fmt;
 use std::mem::MaybeUninit;
 use std::os::raw::c_int;
 use std::ptr;
@@ -314,8 +315,8 @@ impl StreamPolicy<'_> {
         let mut policy: sys::srtp_policy_t = unsafe { MaybeUninit::zeroed().assume_init() };
 
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_undefined;
-        policy.rtp = self.rtp.make();
-        policy.rtcp = self.rtcp.make();
+        policy.rtp = self.rtp.into_raw();
+        policy.rtcp = self.rtcp.into_raw();
 
         let key_length =
             std::cmp::max(policy.rtp.cipher_key_len, policy.rtcp.cipher_key_len) as usize;
@@ -366,5 +367,17 @@ impl UserDataWrapper {
             sys::srtp_event_t_event_key_soft_limit => &mut self.on_key_soft_limit,
             _ => unreachable!(),
         }
+    }
+}
+
+impl fmt::Debug for Session {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("Session { .. }")
+    }
+}
+
+impl fmt::Debug for SessionRef {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("SessionRef { .. }")
     }
 }
