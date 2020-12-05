@@ -2,6 +2,74 @@
 //!
 //! This crate provides a safe interface to the libsrtp2 library.
 //!
+//! # DTLS-SRTP using OpenSSL
+//!
+//! ```rust
+//! # use std::net::{TcpListener, TcpStream};
+//! # type AppResult = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
+//! # fn main() -> AppResult {
+//! #     let server_pkey = include_bytes!("../tests/keys/pkey1.pem");
+//! #     let server_cert = include_bytes!("../tests/keys/cert1.pem");
+//! #     let client_pkey = include_bytes!("../tests/keys/pkey2.pem");
+//! #     let client_cert = include_bytes!("../tests/keys/cert2.pem");
+//! #
+//! #     let listener = TcpListener::bind("127.0.0.1:0")?;
+//! #     let port = listener.local_addr()?.port();
+//! #     let server_thread = std::thread::spawn(move || -> AppResult {
+//! #         let (stream, _) = listener.accept()?;
+//! #         dtls_srtp(server_pkey, server_cert, stream, true)?;
+//! #         Ok(())
+//! #     });
+//! #     let client_thread = std::thread::spawn(move || -> AppResult {
+//! #         let stream = TcpStream::connect(format!("127.0.0.1:{}", port))?;
+//! #         dtls_srtp(client_pkey, client_cert, stream, false)?;
+//! #         Ok(())
+//! #     });
+//! #
+//! #     server_thread.join().unwrap()?;
+//! #     client_thread.join().unwrap()?;
+//! #     Ok(())
+//! # }
+//! # fn dtls_srtp(pkey: &[u8], cert: &[u8], stream: TcpStream, is_server: bool) -> AppResult {
+//! use openssl::pkey::PKey;
+//! use openssl::ssl::{Ssl, SslAcceptor, SslMethod};
+//! use openssl::x509::X509;
+//!
+//! openssl::init();
+//!
+//! let mut ctx = SslAcceptor::mozilla_modern(SslMethod::dtls())?;
+//! ctx.set_tlsext_use_srtp(srtp::openssl::SRTP_PROFILE_NAMES)?;
+//! let pkey = PKey::private_key_from_pem(pkey)?;
+//! let cert = X509::from_pem(cert)?;
+//! ctx.set_private_key(&*pkey)?;
+//! ctx.set_certificate(&*cert)?;
+//! ctx.check_private_key()?;
+//! let ctx = ctx.build().into_context();
+//!
+//! let mut ssl = Ssl::new(&ctx)?;
+//! ssl.set_mtu(1200)?;
+//! let stream = if is_server {
+//!     ssl.accept(stream)?
+//! } else {
+//!     ssl.connect(stream)?
+//! };
+//!
+//! let (mut inbound, mut outbound) =
+//!     srtp::openssl::session_pair(stream.ssl(), Default::default())?;
+//!
+//! let mut pkt = b"not a valid SRTP packet".to_vec();
+//! if let Err(err) = inbound.unprotect(&mut pkt) {
+//!     println!("Failed to unprotect inbound SRTP packet: {}", err);
+//! }
+//!
+//! let mut pkt = b"not a valid RTP packet".to_vec();
+//! if let Err(err) = outbound.protect(&mut pkt) {
+//!     println!("Failed to protect outbound RTP packet: {}", err);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! # Standalone usage
 //!
 //! Create a [`Session`](self::session::Session) to decrypt every incoming SRTP packets.
@@ -12,8 +80,8 @@
 //!
 //! let mut session = srtp::Session::with_inbound_template(srtp::StreamPolicy {
 //!     key,
-//!     rtp: srtp::CryptoPolicy::AES_CM_128_HMAC_SHA1_80,
-//!     rtcp: srtp::CryptoPolicy::AES_CM_128_HMAC_SHA1_80,
+//!     rtp: srtp::CryptoPolicy::aes_cm_128_hmac_sha1_80(),
+//!     rtcp: srtp::CryptoPolicy::aes_cm_128_hmac_sha1_80(),
 //!     ..Default::default()
 //! }).unwrap();
 //!
@@ -37,10 +105,10 @@ mod log_macros {
     #[macro_export]
     macro_rules! error {
         ($format:literal, $($t:tt)*) => {
-            eprintln!(concat!("ERR: ", $format), $($t)*)
+            eprintln!(concat!("SRTP ERR: ", $format), $($t)*)
         };
         ($format:literal) => {
-            eprintln!(concat!("ERR: ", $format))
+            eprintln!(concat!("SRTP ERR: ", $format))
         };
     }
 
@@ -48,10 +116,10 @@ mod log_macros {
     #[macro_export]
     macro_rules! warn {
         ($format:literal, $($t:tt)*) => {
-            eprintln!(concat!("WARN: ", $format), $($t)*)
+            eprintln!(concat!("SRTP WARN: ", $format), $($t)*)
         };
         ($format:literal) => {
-            eprintln!(concat!("WARN: ", $format))
+            eprintln!(concat!("SRTP WARN: ", $format))
         };
     }
 }

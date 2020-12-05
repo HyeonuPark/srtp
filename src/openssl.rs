@@ -12,6 +12,17 @@ use crate::vec_like::VecLike;
 
 type SrtpResult = Result<(), SrtpError>;
 
+#[cfg(feature = "enable-openssl")]
+const SRTP_PROFILE_NAMES_CONTENT: &str =
+    "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32:SRTP_AEAD_AES_128_GCM:SRTP_AEAD_AES_256_GCM";
+
+#[cfg(not(feature = "enable-openssl"))]
+const SRTP_PROFILE_NAMES_CONTENT: &str = "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32";
+
+/// SRTP protection profile names that can be passed
+/// into `SslContextBuilder::set_tlsext_use_srtp()`
+pub const SRTP_PROFILE_NAMES: &str = SRTP_PROFILE_NAMES_CONTENT;
+
 /// SRTP session to convert inbound SRTP packets into RTP.
 #[derive(Debug)]
 pub struct InboundSession {
