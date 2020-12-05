@@ -90,7 +90,7 @@ impl Session {
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound;
 
         unsafe {
-            Error::check(sys::srtp_create(session.as_mut_ptr(), &mut policy))?;
+            Error::check(sys::srtp_create(session.as_mut_ptr(), &policy))?;
             Ok(Session::from_ptr(session.assume_init()))
         }
     }
@@ -108,7 +108,7 @@ impl Session {
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound;
 
         unsafe {
-            Error::check(sys::srtp_create(session.as_mut_ptr(), &mut policy))?;
+            Error::check(sys::srtp_create(session.as_mut_ptr(), &policy))?;
             Ok(Session::from_ptr(session.assume_init()))
         }
     }
@@ -182,10 +182,10 @@ impl SessionRef {
 
     /// Allocate and initialize an SRTP stream within this SRTP session.
     pub fn add_stream(&mut self, ssrc: u32, policy: StreamPolicy<'_>) -> Result<()> {
-        let mut policy = policy.sys_policy_ssrc(ssrc)?;
+        let policy = policy.sys_policy_ssrc(ssrc)?;
 
         unsafe {
-            Error::check(sys::srtp_add_stream(self.as_ptr(), &mut policy))?;
+            Error::check(sys::srtp_add_stream(self.as_ptr(), &policy))?;
             Ok(())
         }
     }
@@ -201,10 +201,10 @@ impl SessionRef {
     /// Update the SRTP stream with the SSRC value from this SRTP session.
     /// Existing ROC value will be preserved.
     pub fn update_stream(&mut self, ssrc: u32, policy: StreamPolicy<'_>) -> Result<()> {
-        let mut policy = policy.sys_policy_ssrc(ssrc)?;
+        let policy = policy.sys_policy_ssrc(ssrc)?;
 
         unsafe {
-            Error::check(sys::srtp_update_stream(self.as_ptr(), &mut policy))?;
+            Error::check(sys::srtp_update_stream(self.as_ptr(), &policy))?;
             Ok(())
         }
     }
@@ -215,7 +215,7 @@ impl SessionRef {
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound;
 
         unsafe {
-            Error::check(sys::srtp_update_stream(self.as_ptr(), &mut policy))?;
+            Error::check(sys::srtp_update_stream(self.as_ptr(), &policy))?;
             Ok(())
         }
     }
@@ -226,7 +226,7 @@ impl SessionRef {
         policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound;
 
         unsafe {
-            Error::check(sys::srtp_update_stream(self.as_ptr(), &mut policy))?;
+            Error::check(sys::srtp_update_stream(self.as_ptr(), &policy))?;
             Ok(())
         }
     }
