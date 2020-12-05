@@ -1,16 +1,33 @@
 [package]
 name = "srtp"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["Hyeonu Park <nemo1275@gmail.com>"]
 edition = "2018"
 
 description = "Rusty wrapper for libsrtp2"
-documentation = "https://docs.rs/srtp/0.6.0/srtp"
+documentation = "https://docs.rs/srtp/0.7.0/srtp"
 repository = "https://github.com/HyeonuPark/srtp"
 keywords = ["srtp"]
 categories = ["multimedia", "network-programming"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-srtp2-sys = "2.30"
-bytes = "0.5"
+srtp2-sys = "3.0"
+paste = "1.0"
+foreign-types = "0.5"
+thiserror = "1.0"
+libc = "0.2"
+bytes = {version = "0.6", optional = true}
+log = {version = "0.4", optional = true}
+openssl = {version = "0.10", optional = true}
+
+[features]
+default = ["bytes", "log", "enable-openssl", "build-libsrtp"]
+skip-linking = ["srtp2-sys/skip-linking"]
+build-libsrtp = ["srtp2-sys/build"]
+enable-openssl = ["openssl", "srtp2-sys/enable-openssl"]
+build-openssl = ["enable-openssl", "srtp2-sys/build-openssl"]
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["skip-linking", "enable-openssl"]

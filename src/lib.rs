@@ -1,269 +1,249 @@
+//! Bindings to libsrtp2
+//!
+//! This crate provides a safe interface to the libsrtp2 library.
+//!
+//! # DTLS-SRTP using OpenSSL
+//!
+//! ```rust
+//! # use std::net::{TcpListener, TcpStream};
+//! # type AppResult = Result<(), Box<dyn std::error::Error + Send + Sync + 'static>>;
+//! # fn main() -> AppResult {
+//! #     let server_pkey = include_bytes!("../tests/keys/pkey1.pem");
+//! #     let server_cert = include_bytes!("../tests/keys/cert1.pem");
+//! #     let client_pkey = include_bytes!("../tests/keys/pkey2.pem");
+//! #     let client_cert = include_bytes!("../tests/keys/cert2.pem");
+//! #
+//! #     let listener = TcpListener::bind("127.0.0.1:0")?;
+//! #     let port = listener.local_addr()?.port();
+//! #     let server_thread = std::thread::spawn(move || -> AppResult {
+//! #         let (stream, _) = listener.accept()?;
+//! #         dtls_srtp(server_pkey, server_cert, stream, true)?;
+//! #         Ok(())
+//! #     });
+//! #     let client_thread = std::thread::spawn(move || -> AppResult {
+//! #         let stream = TcpStream::connect(format!("127.0.0.1:{}", port))?;
+//! #         dtls_srtp(client_pkey, client_cert, stream, false)?;
+//! #         Ok(())
+//! #     });
+//! #
+//! #     server_thread.join().unwrap()?;
+//! #     client_thread.join().unwrap()?;
+//! #     Ok(())
+//! # }
+//! # fn dtls_srtp(pkey: &[u8], cert: &[u8], stream: TcpStream, is_server: bool) -> AppResult {
+//! use openssl::pkey::PKey;
+//! use openssl::ssl::{Ssl, SslAcceptor, SslMethod};
+//! use openssl::x509::X509;
+//!
+//! openssl::init();
+//!
+//! let mut ctx = SslAcceptor::mozilla_modern(SslMethod::dtls())?;
+//! ctx.set_tlsext_use_srtp(srtp::openssl::SRTP_PROFILE_NAMES)?;
+//! let pkey = PKey::private_key_from_pem(pkey)?;
+//! let cert = X509::from_pem(cert)?;
+//! ctx.set_private_key(&*pkey)?;
+//! ctx.set_certificate(&*cert)?;
+//! ctx.check_private_key()?;
+//! let ctx = ctx.build().into_context();
+//!
+//! let mut ssl = Ssl::new(&ctx)?;
+//! ssl.set_mtu(1200)?;
+//! let stream = if is_server {
+//!     ssl.accept(stream)?
+//! } else {
+//!     ssl.connect(stream)?
+//! };
+//!
+//! let (mut inbound, mut outbound) =
+//!     srtp::openssl::session_pair(stream.ssl(), Default::default())?;
+//!
+//! let mut pkt = b"not a valid SRTP packet".to_vec();
+//! if let Err(err) = inbound.unprotect(&mut pkt) {
+//!     println!("Failed to unprotect inbound SRTP packet: {}", err);
+//! }
+//!
+//! let mut pkt = b"not a valid RTP packet".to_vec();
+//! if let Err(err) = outbound.protect(&mut pkt) {
+//!     println!("Failed to protect outbound RTP packet: {}", err);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Standalone usage
+//!
+//! Create a [`Session`](self::session::Session) to decrypt every incoming SRTP packets.
+//!
+//! ```rust
+//! let key = &[0u8; 30][..]; // DO NOT USE IT ON PRODUCTION
+//! let mut packet = b"not a valid SRTP packet".to_vec();
+//!
+//! let mut session = srtp::Session::with_inbound_template(srtp::StreamPolicy {
+//!     key,
+//!     rtp: srtp::CryptoPolicy::aes_cm_128_hmac_sha1_80(),
+//!     rtcp: srtp::CryptoPolicy::aes_cm_128_hmac_sha1_80(),
+//!     ..Default::default()
+//! }).unwrap();
+//!
+//! match session.unprotect(&mut packet) {
+//!     Ok(()) => println!("SRTP packet unprotected"),
+//!     Err(err) => println!("Error unprotecting SRTP packet: {}", err),
+//! };
+//! ```
 
-extern crate srtp2_sys as sys;
+#![deny(missing_docs)]
+#![cfg_attr(feature = "skip-linking", feature(doc_cfg))]
 
-use bytes::{BytesMut};
+#[cfg(feature = "log")]
+#[macro_use]
+extern crate log;
 
-#[derive(Debug)]
-pub struct Srtp {
-    inner: sys::srtp_t,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CryptoPolicy {
-    AesCm128NullAuth,
-    AesCm256NullAuth,
-    AesCm128HmacSha1Bit32,
-    AesCm128HmacSha1Bit80,
-    AesCm256HmacSha1Bit32,
-    AesCm256HmacSha1Bit80,
-    NullCipherHmacNull,
-    NullCipherHmacSha1Bit80,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SsrcType {
-    AnyInbound,
-    AnyOutbound,
-    Specific(u32),
-    Undefined,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    AlgoFail,
-    AllocFail,
-    AuthFail,
-    BadMki,
-    BadParam,
-    CantCheck,
-    CipherFail,
-    DeallocFail,
-    EncodeErr,
-    Fail,
-    InitFail,
-    KeyExpired,
-    NoCtx,
-    NoSuchOp,
-    NonceBad,
-    ParseErr,
-    PfkeyErr,
-    PktIdxAdv,
-    PktIdxOld,
-    ReadFail,
-    ReplayFail,
-    ReplayOld,
-    SemaphoreErr,
-    SignalErr,
-    SocketErr,
-    Terminus,
-    WriteFail,
-    Unknown(u32),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KeyPair<'a> {
-    pub client: &'a [u8],
-    pub server: &'a [u8],
-}
-
-const MAX_TAG_LEN: usize = 16;
-const MAX_MKI_LEN: usize = 128;
-const MAX_TRAILER_LEN: usize = MAX_TAG_LEN + MAX_MKI_LEN;
-
-impl Srtp {
-    pub fn new(
-        ssrc_type: SsrcType,
-        rtp_policy: CryptoPolicy,
-        rtcp_policy: CryptoPolicy,
-        key: &[u8],
-    ) -> Result<Self, Error> {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| unsafe { check(sys::srtp_init()).unwrap() });
-
-        let rtp_keylen = rtp_policy.master_len();
-        let rtcp_keylen = rtcp_policy.master_len();
-
-        if key.len() < rtp_keylen.max(rtcp_keylen) {
-            Err(Error::BadParam)?
-        }
-
-        unsafe {
-            let mut policy: sys::srtp_policy_t = std::mem::zeroed();
-
-            init_crypto_policy(&mut policy.rtp, rtp_policy);
-            init_crypto_policy(&mut policy.rtcp, rtcp_policy);
-            match ssrc_type {
-                SsrcType::AnyInbound => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_inbound
-                }
-                SsrcType::AnyOutbound => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_any_outbound
-                }
-                SsrcType::Specific(value) => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_specific;
-                    policy.ssrc.value = value;
-                }
-                SsrcType::Undefined => {
-                    policy.ssrc.type_ = sys::srtp_ssrc_type_t_ssrc_undefined
-                }
-            }
-
-            policy.key = key.as_ptr() as *mut _;
-            let mut inner = std::ptr::null_mut();
-
-            check(sys::srtp_create(&mut inner, &policy)).map(|_| Srtp { inner })
-        }
+#[cfg(not(feature = "log"))]
+#[macro_use]
+mod log_macros {
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! error {
+        ($format:literal, $($t:tt)*) => {
+            eprintln!(concat!("SRTP ERR: ", $format), $($t)*)
+        };
+        ($format:literal) => {
+            eprintln!(concat!("SRTP ERR: ", $format))
+        };
     }
 
-    pub fn protect(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        unsafe {
-            data.reserve(MAX_TRAILER_LEN);
-            let mut len = data.len() as _;
-            check(sys::srtp_protect(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
-            data.set_len(len as usize);
-        }
-        Ok(())
-    }
-
-    pub fn protect_rtcp(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        unsafe {
-            data.reserve(MAX_TRAILER_LEN);
-            let mut len = data.len() as _;
-            check(sys::srtp_protect_rtcp(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
-            data.set_len(len as usize);
-        }
-        Ok(())
-    }
-
-    pub fn unprotect(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        unsafe {
-            let mut len = data.len() as _;
-            check(sys::srtp_unprotect(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
-            data.set_len(len as usize);
-        }
-        Ok(())
-    }
-
-    pub fn unprotect_rtcp(&mut self, data: &mut BytesMut) -> Result<(), Error> {
-        unsafe {
-            let mut len = data.len() as _;
-            check(sys::srtp_unprotect_rtcp(self.inner, data.as_mut_ptr() as *mut _, &mut len))?;
-            data.set_len(len as usize);
-        }
-        Ok(())
+    #[doc(hidden)]
+    #[macro_export]
+    macro_rules! warn {
+        ($format:literal, $($t:tt)*) => {
+            eprintln!(concat!("SRTP WARN: ", $format), $($t)*)
+        };
+        ($format:literal) => {
+            eprintln!(concat!("SRTP WARN: ", $format))
+        };
     }
 }
 
-impl std::ops::Drop for Srtp {
-    fn drop(&mut self) {
-        unsafe {
-            check(sys::srtp_dealloc(self.inner)).unwrap()
-        }
-    }
-}
+mod crypto_policy;
+mod error;
+#[cfg(feature = "openssl")]
+pub mod openssl;
+pub mod session;
+pub mod vec_like;
 
-unsafe impl Send for Srtp {}
+pub use srtp2_sys as sys;
 
-impl CryptoPolicy {
-    pub const MASTER_KEY_LEN_128: usize = 16;
-    pub const MASTER_KEY_LEN_256: usize = 32;
-    pub const MASTER_SALT_LEN: usize = 14;
-    pub const MAX_MASTER_LEN: usize =
-        CryptoPolicy::MASTER_KEY_LEN_256 + CryptoPolicy::MASTER_SALT_LEN;
+pub use crypto_policy::CryptoPolicy;
+pub use error::Error;
+pub use session::{Session, StreamPolicy};
 
-    pub fn master_key_len(self) -> usize {
-        use CryptoPolicy::*;
+/// Initialize the libsrtp eagerly.
+///
+/// If not called manually, the libsrtp library will be initialized
+/// lazily just before the first operation.
+pub fn ensure_init() {
+    use std::sync::Once;
 
-        match self {
-            AesCm128NullAuth |
-            AesCm128HmacSha1Bit32 |
-            AesCm128HmacSha1Bit80 |
-            AesCm256HmacSha1Bit80 |
-            NullCipherHmacNull |
-            NullCipherHmacSha1Bit80 => CryptoPolicy::MASTER_KEY_LEN_128,
-            AesCm256NullAuth |
-            AesCm256HmacSha1Bit32 => CryptoPolicy::MASTER_KEY_LEN_256,
-        }
-    }
+    static ONCE: Once = Once::new();
 
-    pub fn master_salt_len(self) -> usize {
-        CryptoPolicy::MASTER_SALT_LEN
-    }
+    ONCE.call_once(|| unsafe {
+        Error::check(sys::srtp_init()).expect("Failed to initialize the libsrtp");
 
-    pub fn master_len(self) -> usize {
-        self.master_key_len() + self.master_salt_len()
-    }
+        Error::check(sys::srtp_install_event_handler(Some(handle_event)))
+            .expect("Failed to install global event handler to the libsrtp");
 
-    /// # Panics
-    /// Panics if given `buf` is shorter than `2 * self.master_len()`
-    pub fn extract_keying_material(self, buf: &mut [u8]) -> KeyPair {
-        assert!(buf.len() >= 2 * self.master_len());
-
-        let rot_start = self.master_key_len();
-        let rot_end = 2 * self.master_key_len() + self.master_salt_len();
-
-        buf[rot_start..rot_end].rotate_left(self.master_key_len());
-
-        KeyPair {
-            client: &buf[..self.master_len()],
-            server: &buf[self.master_len()..(2 * self.master_len())],
-        }
-    }
-}
-
-impl Default for CryptoPolicy {
-    fn default() -> Self {
-        CryptoPolicy::AesCm128HmacSha1Bit80
-    }
-}
-
-unsafe fn init_crypto_policy(ctx: &mut sys::srtp_crypto_policy_t, policy: CryptoPolicy) {
-    use CryptoPolicy::*;
-
-    match policy {
-        AesCm128NullAuth        => sys::srtp_crypto_policy_set_aes_cm_128_null_auth(ctx),
-        AesCm256NullAuth        => sys::srtp_crypto_policy_set_aes_cm_256_null_auth(ctx),
-        AesCm128HmacSha1Bit32   => sys::srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32(ctx),
-        AesCm128HmacSha1Bit80   => sys::srtp_crypto_policy_set_rtp_default(ctx),
-        AesCm256HmacSha1Bit32   => sys::srtp_crypto_policy_set_aes_cm_256_hmac_sha1_32(ctx),
-        AesCm256HmacSha1Bit80   => sys::srtp_crypto_policy_set_aes_cm_256_hmac_sha1_80(ctx),
-        NullCipherHmacNull      => sys::srtp_crypto_policy_set_null_cipher_hmac_null(ctx),
-        NullCipherHmacSha1Bit80 => sys::srtp_crypto_policy_set_null_cipher_hmac_sha1_80(ctx),
-    }
-}
-
-fn check(maybe_error: sys::srtp_err_status_t) -> Result<(), Error> {
-    use Error::*;
-
-    Err(match maybe_error {
-        sys::srtp_err_status_t_srtp_err_status_ok => return Ok(()),
-        sys::srtp_err_status_t_srtp_err_status_algo_fail => AlgoFail,
-        sys::srtp_err_status_t_srtp_err_status_alloc_fail => AllocFail,
-        sys::srtp_err_status_t_srtp_err_status_auth_fail => AuthFail,
-        sys::srtp_err_status_t_srtp_err_status_bad_mki => BadMki,
-        sys::srtp_err_status_t_srtp_err_status_bad_param => BadParam,
-        sys::srtp_err_status_t_srtp_err_status_cant_check => CantCheck,
-        sys::srtp_err_status_t_srtp_err_status_cipher_fail => CipherFail,
-        sys::srtp_err_status_t_srtp_err_status_dealloc_fail => DeallocFail,
-        sys::srtp_err_status_t_srtp_err_status_encode_err => EncodeErr,
-        sys::srtp_err_status_t_srtp_err_status_fail => Fail,
-        sys::srtp_err_status_t_srtp_err_status_init_fail => InitFail,
-        sys::srtp_err_status_t_srtp_err_status_key_expired => KeyExpired,
-        sys::srtp_err_status_t_srtp_err_status_no_ctx => NoCtx,
-        sys::srtp_err_status_t_srtp_err_status_no_such_op => NoSuchOp,
-        sys::srtp_err_status_t_srtp_err_status_nonce_bad => NonceBad,
-        sys::srtp_err_status_t_srtp_err_status_parse_err => ParseErr,
-        sys::srtp_err_status_t_srtp_err_status_pfkey_err => PfkeyErr,
-        sys::srtp_err_status_t_srtp_err_status_pkt_idx_adv => PktIdxAdv,
-        sys::srtp_err_status_t_srtp_err_status_pkt_idx_old => PktIdxOld,
-        sys::srtp_err_status_t_srtp_err_status_read_fail => ReadFail,
-        sys::srtp_err_status_t_srtp_err_status_replay_fail => ReplayFail,
-        sys::srtp_err_status_t_srtp_err_status_replay_old => ReplayOld,
-        sys::srtp_err_status_t_srtp_err_status_semaphore_err => SemaphoreErr,
-        sys::srtp_err_status_t_srtp_err_status_signal_err => SignalErr,
-        sys::srtp_err_status_t_srtp_err_status_socket_err => SocketErr,
-        sys::srtp_err_status_t_srtp_err_status_terminus => Terminus,
-        sys::srtp_err_status_t_srtp_err_status_write_fail => WriteFail,
-        _ => Unknown(maybe_error),
+        #[cfg(feature = "log")]
+        Error::check(sys::srtp_install_log_handler(
+            Some(handle_log),
+            std::ptr::null_mut(),
+        ))
+        .expect("Failed to install log handler to the libsrtp")
     })
+}
+
+/// Returns the numeric representation of the libsrtp version.
+///
+/// Major and minor version number takes single byte,
+/// and the micro takes remaining two.
+///
+/// For example, version 2.3.0 yields `0x02_03_0000`
+pub fn get_version() -> u32 {
+    ensure_init();
+    unsafe { sys::srtp_get_version() }
+}
+
+/// Returns the version string of the libsrtp.
+pub fn get_version_string() -> &'static str {
+    ensure_init();
+    unsafe {
+        let version_ptr = sys::srtp_get_version_string();
+        std::ffi::CStr::from_ptr(version_ptr)
+            .to_str()
+            .expect("libsrtp returns version string which is not a valid UTF-8 sequence")
+    }
+}
+
+unsafe extern "C" fn handle_event(data: *mut sys::srtp_event_data_t) {
+    use foreign_types::ForeignTypeRef;
+
+    let sys::srtp_event_data_t {
+        session,
+        ssrc,
+        event,
+    } = *data;
+
+    match event {
+        sys::srtp_event_t_event_ssrc_collision => warn!(
+            "SSRC collision event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        sys::srtp_event_t_event_key_hard_limit => warn!(
+            "key hard limit event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        sys::srtp_event_t_event_key_soft_limit => warn!(
+            "key soft limit event, session: {:p}, ssrc: {}",
+            session, ssrc
+        ),
+        _ => {
+            warn!(
+                "Unknown event detected. \
+                Please report this log line to this crate's repository. \
+                event: {}, session: {:p}, ssrc: {}",
+                event, session, ssrc
+            );
+            return;
+        }
+    }
+
+    let session = session::SessionRef::from_ptr_mut((*data).session);
+    let wrapper = session.user_data_wrapper();
+    let mut user_data = wrapper.user_data.take();
+    let mut handler = match wrapper.event_handler(event).take() {
+        Some(handler) => handler,
+        None => return,
+    };
+
+    handler(session, ssrc, user_data.as_deref_mut());
+
+    let wrapper = session.user_data_wrapper();
+    wrapper.user_data = user_data;
+    *wrapper.event_handler(event) = Some(handler);
+}
+
+#[cfg(feature = "log")]
+unsafe extern "C" fn handle_log(
+    level: sys::srtp_log_level_t,
+    msg: *const std::os::raw::c_char,
+    _: *mut std::ffi::c_void,
+) {
+    let msg = std::ffi::CStr::from_ptr(msg).to_string_lossy();
+
+    match level {
+        sys::srtp_log_level_t_srtp_log_level_debug => log::debug!("LOG: {}", msg),
+        sys::srtp_log_level_t_srtp_log_level_info => log::info!("LOG: {}", msg),
+        sys::srtp_log_level_t_srtp_log_level_warning => log::warn!("LOG: {}", msg),
+        sys::srtp_log_level_t_srtp_log_level_error => log::error!("LOG: {}", msg),
+        other => log::error!("UNKNOWN LEVEL {}: {}", other, msg),
+    };
 }
