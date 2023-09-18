@@ -6,9 +6,6 @@ use srtp2_sys as sys;
 use crate::crypto_policy::CryptoPolicy;
 use crate::error::Error as SrtpError;
 use crate::session::{Session, StreamPolicy};
-use crate::vec_like::VecLike;
-
-type SrtpResult = Result<(), SrtpError>;
 
 const SRTP_PROFILE_NAMES_CONTENT: &str =
     "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32:SRTP_AEAD_AES_128_GCM:SRTP_AEAD_AES_256_GCM";
@@ -146,12 +143,12 @@ pub fn session_pair(
 
 impl InboundSession {
     /// Convert SRTP packet stored in the `buf` into RTP in-place
-    pub fn unprotect<T: VecLike>(&mut self, buf: &mut T) -> SrtpResult {
+    pub fn unprotect(&mut self, buf: &mut [u8]) -> Result<usize, SrtpError> {
         self.session.unprotect(buf)
     }
 
     /// Convert SRTCP packet stored in the `buf` into RTCP in-place
-    pub fn unprotect_rtcp<T: VecLike>(&mut self, buf: &mut T) -> SrtpResult {
+    pub fn unprotect_rtcp(&mut self, buf: &mut [u8]) -> Result<usize, SrtpError> {
         self.session.unprotect_rtcp(buf)
     }
 
@@ -168,13 +165,13 @@ impl InboundSession {
 
 impl OutboundSession {
     /// Convert RTP packet stored in the `buf` into SRTP in-place
-    pub fn protect<T: VecLike>(&mut self, buf: &mut T) -> SrtpResult {
-        self.session.protect(buf)
+    pub fn protect(&mut self, buf: &mut [u8], length: usize) -> Result<usize, SrtpError> {
+        self.session.protect(buf, length)
     }
 
     /// Convert RTCP packet stored in the `buf` into SRTCP in-place
-    pub fn protect_rtcp<T: VecLike>(&mut self, buf: &mut T) -> SrtpResult {
-        self.session.protect_rtcp(buf)
+    pub fn protect_rtcp(&mut self, buf: &mut [u8], length: usize) -> Result<usize, SrtpError> {
+        self.session.protect_rtcp(buf, length)
     }
 
     /// Get a reference to the Session.

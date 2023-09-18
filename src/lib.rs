@@ -130,7 +130,6 @@ mod log_macros {
 mod crypto_policy;
 mod error;
 pub mod session;
-pub mod vec_like;
 
 #[cfg(feature = "openssl")]
 pub mod openssl {
@@ -153,6 +152,9 @@ pub use srtp2_sys as sys;
 pub use crypto_policy::CryptoPolicy;
 pub use error::Error;
 pub use session::{Session, StreamPolicy};
+
+/// extra trailing capacity needed to protect buffer
+pub const PROTECT_RESERVE_CAPACITY: usize = sys::SRTP_MAX_TRAILER_LEN as usize;
 
 /// Initialize the libsrtp eagerly.
 ///

@@ -13,7 +13,6 @@ use srtp2_sys as sys;
 
 use crate::crypto_policy::CryptoPolicy;
 use crate::error::{Error, Result};
-use crate::vec_like::VecLike;
 
 foreign_types::foreign_type! {
     /// SRTP session
@@ -115,24 +114,21 @@ impl Session {
 }
 
 impl SessionRef {
-    unsafe fn overwrite<T: VecLike>(
+    unsafe fn overwrite(
         &mut self,
-        buf: &mut T,
-        reserve: bool,
+        buf: &mut [u8],
+        length: usize,
+        protect: bool,
         func: unsafe extern "C" fn(sys::srtp_t, *mut c_void, *mut c_int) -> sys::srtp_err_status_t,
-    ) -> Result<()> {
-        if reserve {
-            if let Err(err) = buf.reserve(sys::SRTP_MAX_TRAILER_LEN as usize) {
-                error!("`buf.reserve()` failed: {}", err);
-                return Err(Error::BAD_PARAM);
-            }
+    ) -> Result<usize> {
+        if protect && buf.len().saturating_sub(length) < crate::PROTECT_RESERVE_CAPACITY {
+            error!("buffer doesn't have trailing reserved capacity");
+            return Err(Error::BAD_PARAM);
         }
 
-        let bytes = buf.as_mut_bytes();
-        let orig_length = bytes.len();
-        let head_ptr = bytes.as_mut_ptr() as *mut c_void;
+        let head_ptr = buf.as_mut_ptr() as *mut c_void;
 
-        let mut length: c_int = match orig_length.try_into() {
+        let mut out_length: c_int = match length.try_into() {
             Ok(len) => len,
             Err(err) => {
                 error!("Cannot convert the length of the `key` into c_int: {}", err);
@@ -140,44 +136,36 @@ impl SessionRef {
             }
         };
 
-        let res = Error::check(func(self.as_ptr(), head_ptr, &mut length));
-        if let Err(err) = res {
-            // Operation failed.
-            // No assumptions should be made to the buffer.
-            buf.set_len(0);
-            return Err(err);
-        }
+        Error::check(func(self.as_ptr(), head_ptr, &mut out_length))?;
 
         #[cfg(debug_assertions)]
-        if reserve {
-            assert!(length as usize <= orig_length + sys::SRTP_MAX_TRAILER_LEN as usize)
+        if protect {
+            assert!(out_length as usize <= length + crate::PROTECT_RESERVE_CAPACITY)
         } else {
-            assert!(length as usize <= orig_length)
+            assert!(out_length as usize <= length)
         }
 
-        buf.set_len(length as usize);
-
-        Ok(())
+        Ok(out_length as usize)
     }
 
     /// Convert RTP packet stored in the `buf` into SRTP in-place
-    pub fn protect<T: VecLike>(&mut self, buf: &mut T) -> Result<()> {
-        unsafe { self.overwrite(buf, true, sys::srtp_protect) }
+    pub fn protect(&mut self, buf: &mut [u8], length: usize) -> Result<usize> {
+        unsafe { self.overwrite(buf, length, true, sys::srtp_protect) }
     }
 
     /// Convert RTCP packet stored in the `buf` into SRTCP in-place
-    pub fn protect_rtcp<T: VecLike>(&mut self, buf: &mut T) -> Result<()> {
-        unsafe { self.overwrite(buf, true, sys::srtp_protect_rtcp) }
+    pub fn protect_rtcp(&mut self, buf: &mut [u8], length: usize) -> Result<usize> {
+        unsafe { self.overwrite(buf, length, true, sys::srtp_protect_rtcp) }
     }
 
     /// Convert SRTP packet stored in the `buf` into RTP in-place
-    pub fn unprotect<T: VecLike>(&mut self, buf: &mut T) -> Result<()> {
-        unsafe { self.overwrite(buf, false, sys::srtp_unprotect) }
+    pub fn unprotect(&mut self, buf: &mut [u8]) -> Result<usize> {
+        unsafe { self.overwrite(buf, buf.len(), false, sys::srtp_unprotect) }
     }
 
     /// Convert SRTCP packet stored in the `buf` into RTCP in-place
-    pub fn unprotect_rtcp<T: VecLike>(&mut self, buf: &mut T) -> Result<()> {
-        unsafe { self.overwrite(buf, false, sys::srtp_unprotect_rtcp) }
+    pub fn unprotect_rtcp(&mut self, buf: &mut [u8]) -> Result<usize> {
+        unsafe { self.overwrite(buf, buf.len(), false, sys::srtp_unprotect_rtcp) }
     }
 
     /// Allocate and initialize an SRTP stream within this SRTP session.
