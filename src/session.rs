@@ -253,7 +253,7 @@ impl SessionRef {
             match (sys::srtp_get_user_data(self.as_ptr()) as *mut UserDataWrapper).as_mut() {
                 Some(wrapper) => wrapper,
                 None => {
-                    let wrapper = Box::into_raw(Box::new(UserDataWrapper::default()));
+                    let wrapper: *mut UserDataWrapper = Box::into_raw(Box::default());
                     sys::srtp_set_user_data(self.as_ptr(), wrapper as *mut c_void);
                     &mut *wrapper
                 }

@@ -20,14 +20,16 @@ libc = "0.2"
 bytes = {version = "0.6", optional = true}
 log = {version = "0.4", optional = true}
 openssl = {version = "0.10", optional = true}
+boring = {version = "3.1", optional = true}
 
 [features]
-default = ["bytes", "log", "enable-openssl", "build-libsrtp"]
+default = ["bytes", "log", "build-libsrtp"]
 skip-linking = ["srtp2-sys/skip-linking"]
 build-libsrtp = ["srtp2-sys/build"]
-enable-openssl = ["openssl", "srtp2-sys/enable-openssl"]
-build-openssl = ["enable-openssl", "srtp2-sys/build-openssl"]
+openssl = ["dep:openssl", "srtp2-sys/enable-openssl"]
+build-openssl = ["openssl", "srtp2-sys/build-openssl"]
+boringssl = ["dep:boring", "srtp2-sys/enable-openssl"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = ["skip-linking", "enable-openssl"]
+features = ["skip-linking", "openssl"]

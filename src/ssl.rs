@@ -1,8 +1,6 @@
-//! DTLS-SRTP implementation using OpenSSL
-
 use std::mem::MaybeUninit;
 
-use openssl::ssl::{self, SslRef};
+use libssl::ssl::{self, SslRef};
 use srtp2_sys as sys;
 
 use crate::crypto_policy::CryptoPolicy;
@@ -12,12 +10,8 @@ use crate::vec_like::VecLike;
 
 type SrtpResult = Result<(), SrtpError>;
 
-#[cfg(feature = "enable-openssl")]
 const SRTP_PROFILE_NAMES_CONTENT: &str =
     "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32:SRTP_AEAD_AES_128_GCM:SRTP_AEAD_AES_256_GCM";
-
-#[cfg(not(feature = "enable-openssl"))]
-const SRTP_PROFILE_NAMES_CONTENT: &str = "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32";
 
 /// SRTP protection profile names that can be passed
 /// into `SslContextBuilder::set_tlsext_use_srtp()`
@@ -54,19 +48,19 @@ pub struct Config<'a> {
 /// Errors that can be thrown during DTLS-SRTP using openssl.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[allow(missing_docs)]
+    /// SRTP error
     #[error("SRTP error: {0}")]
     Srtp(#[from] SrtpError),
-    #[allow(missing_docs)]
-    #[error("OpenSSL error: {0}")]
+    /// SSL library error
+    #[error("SSL error: {0}")]
     Ssl(#[from] ssl::Error),
     /// SSL context doesn't have SRTP profile.
     #[error("SSL context missing SRTP profile")]
     MissingSrtpProfile,
 }
 
-impl From<openssl::error::ErrorStack> for Error {
-    fn from(e: openssl::error::ErrorStack) -> Self {
+impl From<libssl::error::ErrorStack> for Error {
+    fn from(e: libssl::error::ErrorStack) -> Self {
         Error::Ssl(e.into())
     }
 }

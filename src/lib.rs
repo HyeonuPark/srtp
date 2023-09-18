@@ -94,6 +94,9 @@
 #![deny(missing_docs)]
 #![cfg_attr(feature = "skip-linking", feature(doc_cfg))]
 
+#[cfg(all(feature = "openssl", feature = "boringssl"))]
+compile_error!("having both openssl and boringssl is not supported");
+
 #[cfg(feature = "log")]
 #[macro_use]
 extern crate log;
@@ -126,10 +129,24 @@ mod log_macros {
 
 mod crypto_policy;
 mod error;
-#[cfg(feature = "openssl")]
-pub mod openssl;
 pub mod session;
 pub mod vec_like;
+
+#[cfg(feature = "openssl")]
+pub mod openssl {
+    //! DTLS-SRTP implementation using OpenSSL
+
+    use openssl as libssl;
+    include!("ssl.rs");
+}
+
+#[cfg(feature = "boringssl")]
+pub mod boringssl {
+    //! DTLS-SRTP implementation using BoringSSL
+
+    use boring as libssl;
+    include!("ssl.rs");
+}
 
 pub use srtp2_sys as sys;
 
